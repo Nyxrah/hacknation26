@@ -2,7 +2,7 @@
 //   ocena sytuacji wodnej → identyfikacja przyczyn → rekomendacje retencyjne → agrotechniczne → nawadnianie.
 // Każda rekomendacja wynika z rozpoznanych warunków działki i wskazuje dane, na których się opiera.
 import type { Analysis } from './analyze.ts'
-import { CROPS, inSeason, kcAt, ndmiRef, ndviRef, phaseAt, type Crop, type CropId } from './crops.ts'
+import { CROPS, cnFor, cnGroupName, inSeason, kcAt, ndmiRef, ndviRef, phaseAt, type Crop, type CropId } from './crops.ts'
 import { CN_ARABLE, cnAmc, scsRunoff } from './hydro.ts'
 import { awcGainFromOM, type Soil } from './soil.ts'
 import type { NdmiScene } from './types.ts'
@@ -73,7 +73,30 @@ export interface Assessment {
   series: { date: string; avail: number; thr: number; p: number; forecast: boolean }[]
   limits: string[]
   seasonal: Seasonal
+  period: PeriodSummary | null
+  cropRank: CropFit[]
 }
+
+export interface PeriodSummary {
+  from: string
+  to: string
+  days: number
+  p: number
+  snowCm: number
+  et0: number
+  kbw: number
+  frostDays: number
+  hotDays: number
+  longestDry: number
+  stressDays: number
+  seasonDays: number
+  deficit: number // ile wody zabrakło roślinom [mm] — potrzeba nawadniania
+  runoffMm: number
+  norm: { p: number; kbw: number; drierP: number; drierKbw: number; n: number } | null
+  years: { year: number; p: number; kbw: number; stress: number; drought: boolean }[]
+}
+
+export interface CropFit { id: CropId; name: string; icon: string; yieldPct: number; droughtYears: number; irrigMm: number; chosen: boolean }
 
 const MONTHS = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru']
 const MONTHS_GEN = ['stycznia', 'lutego', 'marca', 'kwietnia', 'maja', 'czerwca', 'lipca', 'sierpnia', 'września', 'października', 'listopada', 'grudnia']
@@ -138,7 +161,7 @@ function startDepletion(w: WeatherSeries, year: number, taw: number) {
 export function interpretSat(scene: NdmiScene | null | undefined, crop: Crop, date: string, mask: Uint8Array): SatInterp {
   const empty = (note: string): SatInterp => ({ scene: scene ?? null, ndvi: null, ndmi: null, ndviRef: null, ndmiRef: null, sev: null, dryShare: null, note, ageDays: null })
   if (scene === undefined) return empty('Pobieram zdjęcie satelitarne…')
-  if (!scene) return empty('Brak bezchmurnego zdjęcia Sentinel-2 z 30 dni przed datą analizy — wskaźnika satelitarnego nie oceniamy.')
+  if (!scene) return empty('Brak bezchmurnego zdjęcia Sentinel-2 z 45 dni przed datą analizy — wskaźnika satelitarnego nie oceniamy.')
   const age = Math.round((new Date(date).getTime() - new Date(scene.date).getTime()) / 86400000)
   const doy = doyOf(scene.date)
   const ref = ndviRef(crop, doy)
@@ -186,17 +209,19 @@ export interface AssessInput {
   missing: string[]
   farmer: FarmerInput
   areaHa: number
+  from?: string
 }
 
 /** Odpowiedzi rolnika — dane, których nie ma w żadnej bazie, a rolnik zna najlepiej. */
 export interface FarmerInput {
   drainage: 'tak' | 'nie' | 'nie wiem'
-  soil: null | 'bardzo lekka' | 'lekka' | 'średnia' | 'ciężka'
+  soil: null | 'bardzo lekka' | 'lekka' | 'średnia' | 'ciężka' | 'czarnoziem'
   rain7: number | null // własny pomiar opadu z 7 dni przed datą analizy [mm]
   tillage: 'orka' | 'bezorkowa' | 'nie wiem'
   trees: 'tak' | 'nie' | 'nie wiem' // wierzby / topole przy polu
+  irrigUsed: number | null // ile wody rolnik zużywa na nawadnianie w sezonie [m³]
 }
-export const NO_FARMER: FarmerInput = { drainage: 'nie wiem', soil: null, rain7: null, tillage: 'nie wiem', trees: 'nie wiem' }
+export const NO_FARMER: FarmerInput = { drainage: 'nie wiem', soil: null, rain7: null, tillage: 'nie wiem', trees: 'nie wiem', irrigUsed: null }
 
 export function assess(inp: AssessInput): Assessment {
   const { date, w, soil, A } = inp
@@ -208,7 +233,7 @@ export function assess(inp: AssessInput): Assessment {
   const raw = crop.p * taw
   const slope = A?.meanSlopePct ?? 0
   const slopeAdj = slope > 8 ? 6 : slope > 4 ? 3 : 0
-  const cn = Math.min(95, CN_ARABLE[soil.hsg] + slopeAdj)
+  const cn = Math.min(95, cnFor(crop)[soil.hsg] + slopeAdj)
   const baseMods = inp.farmer.tillage === 'bezorkowa' ? NOTILL : undefined
 
   // --- klimat: klimatyczny bilans wodny (P − ET0) na tle 10 lat ---
@@ -306,7 +331,7 @@ export function assess(inp: AssessInput): Assessment {
   const parts: { sev: Sev; w: number; name: string }[] = []
   if (soilSev !== null) parts.push({ sev: soilSev, w: 0.3, name: 'bilans glebowy' })
   parts.push({ sev: climSev, w: active ? 0.2 : 0.5, name: 'opad − parowanie' })
-  if (smSev !== null) parts.push({ sev: smSev, w: active ? 0.25 : 0.5, name: 'wilgotność gleby ERA5-Land' })
+  if (smSev !== null) parts.push({ sev: smSev, w: active ? 0.25 : 0.5, name: `wilgotność gleby ${w.smLabel}` })
   if (sat.sev !== null) parts.push({ sev: sat.sev, w: satW, name: 'satelita' })
   const ws = parts.reduce((a, p) => a + p.w, 0)
   const score = parts.reduce((a, p) => a + p.sev * p.w, 0) / ws
@@ -319,35 +344,35 @@ export function assess(inp: AssessInput): Assessment {
     (active && sat.sev === null ? '; bez zdjęcia satelitarnego' : '') + (!active ? '; uprawa poza sezonem wegetacji' : '')
 
   const statusText = !active
-    ? `${crop.name} jest teraz ${phaseAt(crop, doy)}. Oceniamy zapas wody w glebie i opady na tle 10 lat. ${climSev >= 2 ? 'Przełom sezonu jest wyraźnie suchszy niż zwykle.' : 'Opady na tle wielolecia są w normie lub powyżej.'}`
-    : sev === 0 ? `Rośliny mają dość wody. Zapas w strefie korzeni: ${cur.availPct}%.`
-      : `W strefie korzeni zostało ${cur.availPct}% wody dostępnej dla roślin${cur.ks < 0.97 ? ', rośliny już ograniczają wzrost' : ''}. ${climSev >= 2 ? `Ostatnie 30 dni było jednym z najsuchszych takich okresów w dekadzie.` : ''}`
+    ? `${crop.name} jest teraz ${phaseAt(crop, doy)}. ${month0(date) >= 10 || month0(date) <= 1 ? 'Zimą rośliny prawie nie pobierają wody — to czas, gdy gleba i wody gruntowe gromadzą zapas na wiosnę. ' : ''}Oceniamy zapas wody w glebie i opady na tle 10 lat. ${climSev >= 2 ? 'Przełom sezonu jest wyraźnie suchszy niż zwykle.' : 'Opady na tle wielolecia są w normie lub powyżej.'}`
+    : sev === 0 ? `Rośliny prawdopodobnie mają dość wody. Szacowany zapas w strefie korzeni: ${cur.availPct}%.`
+      : `Szacujemy, że w strefie korzeni zostało ok. ${cur.availPct}% wody dostępnej dla roślin${cur.ks < 0.97 ? ', rośliny prawdopodobnie już ograniczają wzrost' : ''}. ${climSev >= 2 ? `Ostatnie 30 dni było jednym z najsuchszych takich okresów w dekadzie.` : ''}`
 
   // --- przyczyny ---
   const causes: Cause[] = []
   causes.push({
-    id: 'opady', title: 'Mało opadów, duże parowanie',
+    id: 'opady', title: 'Opady i parowanie',
     active: climPct < 35 || hot30 > hot30norm + 3,
     strength: climPct < 15 ? 'silny' : climPct < 35 ? 'umiarkowany' : 'słaby',
     text: `W ostatnich 30 dniach spadło ${r0(p30)} mm deszczu (norma z 10 lat: ${r0(p30norm)} mm). Bilans opad − parowanie: ${sign(kbw30)} mm${hot30 ? `, dni upalnych ≥ 30°C: ${hot30} (zwykle ${hot30norm.toFixed(0)})` : ''}.`,
     evidence: [`klimatyczny bilans wodny 30 dni: ${sign(kbw30)} mm (${r0(kbw30pct)}. percentyl 10 lat)`, `60 dni: ${sign(kbw60)} mm (${r0(kbw60pct)}. percentyl)`, `dni bez deszczu z rzędu: ${drySpell}`],
   })
   causes.push({
-    id: 'gleba', title: 'Gleba słabo magazynuje wodę',
+    id: 'gleba', title: 'Gleba i jej zapas wody',
     active: soil.category === 'I' || soil.category === 'II' || soil.awc < 120,
     strength: soil.category === 'I' ? 'silny' : soil.category === 'II' || soil.awc < 120 ? 'umiarkowany' : 'słaby',
-    text: `${soil.source === 'brak' ? 'Brak danych glebowych — przyjęto glebę średnią. ' : ''}Gleba: ${soil.texture} (piasek ${r0(soil.sand)}%, ił ${r0(soil.clay)}%), próchnica ok. ${soil.om.toFixed(1)}%. W strefie korzeni ${crop.short} mieści się ok. ${r0(taw)} mm wody dostępnej — ${soil.categoryName}.`,
+    text: `${soil.source === 'brak' ? 'Brak danych glebowych — przyjęto glebę średnią. ' : ''}Gleba: ${soil.texture} (piasek ${r0(soil.sand)}%, ił ${r0(soil.clay)}%), próchnica ok. ${soil.om.toFixed(1)}%. W strefie korzeni ${crop.short} mieści się ok. ${r0(taw)} mm wody dostępnej — ${soil.categoryName}.${soil.awc >= 180 ? ' Taka gleba magazynuje dużo wody z zimy — zapas często starcza na dużą część lata.' : soil.awc < 110 ? ' Taka gleba szybko traci zapas z zimy — susza przychodzi tu najwcześniej.' : ''}`,
     evidence: [`pojemność wodna: ${r0(soil.awc)} mm/m (Saxton & Rawls 2006)`, `kategoria podatności: ${soil.category}`, `grupa hydrologiczna gleby: ${soil.hsg}`],
   })
   const annual = A?.years.length ? A.years.reduce((s, y) => s + y.runoffM3, 0) / A.years.length : 0
   const mainExit = A?.exits[0]?.share ?? 0
   causes.push(A ? {
-    id: 'odplyw', title: 'Woda spływa z pola',
+    id: 'odplyw', title: 'Spływ wody z pola',
     active: slope > 3 || (mainExit > 0.4 && annual > 200),
     strength: slope > 8 ? 'silny' : slope > 3 ? 'umiarkowany' : 'słaby',
     text: `Średni spadek pola ${slope.toFixed(1)}%, różnica wysokości ${(A.pzmax - A.pzmin).toFixed(1)} m. Po ulewach z działki spływa średnio ok. ${r0(annual / 10) * 10} m³ wody rocznie${mainExit > 0.3 ? `, z czego ${r0(mainExit * 100)}% jednym miejscem` : ''}.`,
-    evidence: [`teren: ${inp.demLabel}`, `spływ: metoda SCS-CN (CN ${cn}), opady dobowe 10 lat`, `punkty wyjścia wody: ${A.exits.length}`],
-  } : { id: 'odplyw', title: 'Woda spływa z pola', active: false, pending: true, strength: 'słaby', text: 'Analizuję ukształtowanie terenu…', evidence: [] })
+    evidence: [`teren: ${inp.demLabel}`, `spływ: SCS-CN, CN ${cn} (${cnGroupName(crop)}, gleba gr. ${soil.hsg}, spadek ${slope.toFixed(1)}%), z poprawką na wilgotność poprzedzającą`, `punkty wyjścia wody: ${A.exits.length}`],
+  } : { id: 'odplyw', title: 'Spływ wody z pola', active: false, pending: true, strength: 'słaby', text: 'Analizuję ukształtowanie terenu…', evidence: [] })
   const inCrit = doy >= crop.critical[0] - 10 && doy <= crop.critical[1]
   causes.push({
     id: 'uprawa', title: `Wrażliwa faza: ${crop.short}`,
@@ -357,7 +382,7 @@ export function assess(inp: AssessInput): Assessment {
     evidence: [`zapotrzebowanie: Kc = ${kcAt(crop, doy).toFixed(2)}`, `korzenie do ${crop.zr} m`],
   })
   causes.push({
-    id: 'historia', title: 'Susza wraca na tej działce',
+    id: 'historia', title: 'Susze w ostatnich 10 latach',
     active: droughtYears >= 3,
     strength: droughtYears >= 5 ? 'silny' : droughtYears >= 3 ? 'umiarkowany' : 'słaby',
     text: `W ${droughtYears} z ${rows.length} ostatnich lat ${crop.short} na tej glebie miała niedobór wody w okresie krytycznym. Najbardziej ryzykowny okres: ${riskMonths}.`,
@@ -580,6 +605,87 @@ export function assess(inp: AssessInput): Assessment {
     why: S.frost.text + ' Nie wykonuj w tych dniach zabiegów nalistnych i herbicydowych; po przymrozku obejrzyj łan, zanim zdecydujesz o dalszych zabiegach.',
   })
 
+
+  // --- okres wskazany przez użytkownika (od–do) ---
+  let period: PeriodSummary | null = null
+  if (inp.from && inp.from < date) {
+    const a = idxOf(w, inp.from), b = di
+    const sumR = (x: number, y: number, f: (i: number) => number) => { let t = 0; for (let i = Math.max(0, x); i <= y; i++) t += f(i); return t }
+    let longest = 0, run = 0, frostDays = 0, hotDays = 0
+    for (let i = a; i <= b; i++) { run = w.p[i] < 1 ? run + 1 : 0; longest = Math.max(longest, run); if (w.tmin[i] <= 0) frostDays++; if (w.tmax[i] >= 30) hotDays++ }
+    // bilans wody w glebie dla każdego sezonu, który zachodzi na okres
+    let stressDays = 0, seasonDays = 0, deficit = 0
+    const years: PeriodSummary['years'] = []
+    const y0 = Number(inp.from.slice(0, 4))
+    for (let yy = y0; yy <= year; yy++) {
+      const sa = idxOf(w, `${yy}-03-01`), sb = Math.min(idxOf(w, `${yy}-10-31`), di)
+      let yStress = 0
+      if (w.dates[sa]?.slice(0, 4) === String(yy) && sa <= sb) {
+        for (const d of runSeason(w, crop, taw, cn, sa, sb, startDepletion(w, yy, taw), baseMods)) {
+          if (d.date < inp.from || d.date > date || !inSeason(crop, d.doy)) continue
+          seasonDays++
+          deficit += d.etc - d.eta
+          if (d.ks < 0.95) { stressDays++; yStress++ }
+        }
+      }
+      const ya = Math.max(a, idxOf(w, `${yy}-01-01`)), yb = Math.min(b, idxOf(w, `${yy}-12-31`))
+      years.push({ year: yy, p: sumR(ya, yb, (i) => w.p[i]), kbw: sumR(ya, yb, (i) => w.p[i] - w.et0[i]), stress: yStress, drought: yStress >= 10 })
+    }
+    let runoffMm = 0
+    for (let i = a; i <= b; i++) { let p5 = 0; for (let k = Math.max(0, i - 5); k < i; k++) p5 += w.liquid[k]; const d = doyOf(w.dates[i]); runoffMm += scsRunoff(w.liquid[i], cnAmc(cn, p5, d > 105 && d < 290)) }
+    const p = sumR(a, b, (i) => w.p[i]), kbwP = sumR(a, b, (i) => w.p[i] - w.et0[i])
+    let norm: PeriodSummary['norm'] = null
+    if (b - a <= 366) {
+      const hist: { p: number; kbw: number }[] = []
+      for (let k = 1; k <= 10; k++) {
+        const fa = `${Number(inp.from.slice(0, 4)) - k}${inp.from.slice(4)}`, fb = `${year - k}${date.slice(4)}`
+        if (fa < w.start) continue
+        const ia = idxOf(w, fa), ib = idxOf(w, fb)
+        hist.push({ p: sumR(ia, ib, (i) => w.p[i]), kbw: sumR(ia, ib, (i) => w.p[i] - w.et0[i]) })
+      }
+      if (hist.length >= 5) norm = { p: hist.reduce((t, h) => t + h.p, 0) / hist.length, kbw: hist.reduce((t, h) => t + h.kbw, 0) / hist.length, drierP: hist.filter((h) => h.p < p).length, drierKbw: hist.filter((h) => h.kbw < kbwP).length, n: hist.length }
+    }
+    period = { from: inp.from, to: date, days: b - a + 1, p, snowCm: sumR(a, b, (i) => w.snowCm[i]), et0: sumR(a, b, (i) => w.et0[i]), kbw: kbwP, frostDays, hotDays, longestDry: longest, stressDays, seasonDays, deficit, runoffMm, norm, years }
+  }
+
+  // --- która uprawa najlepiej pasuje do wody na tej działce (10 lat, ta sama gleba i teren) ---
+  const cropRank: CropFit[] = Object.values(CROPS).map((c) => {
+    const tw = soil.awc * c.zr, cnc = Math.min(95, cnFor(c)[soil.hsg] + slopeAdj)
+    let yr = 0, nY = 0, dry = 0
+    const need: number[] = []
+    for (const yy of prevYears) {
+      const a = idxOf(w, `${yy}-03-01`), b = idxOf(w, `${yy}-10-31`)
+      if (w.dates[a].slice(0, 4) !== String(yy)) continue
+      let eta = 0, etc = 0, sc = 0
+      for (const d of runSeason(w, c, tw, cnc, a, b, startDepletion(w, yy, tw), baseMods)) {
+        if (inSeason(c, d.doy)) { eta += d.eta; etc += d.etc }
+        if (d.doy >= c.critical[0] && d.doy <= c.critical[1] && d.ks < 0.95) sc++
+      }
+      const ratio = etc > 0 ? Math.max(0, 1 - c.ky * (1 - eta / etc)) : 1
+      yr += ratio; nY++
+      if (sc >= 10 || ratio < 0.85) dry++
+      need.push(etc - eta)
+    }
+    need.sort((x, y) => x - y)
+    return { id: c.id, name: c.name, icon: c.icon, yieldPct: nY ? Math.round((yr / nY) * 100) : 100, droughtYears: dry, irrigMm: Math.round(need[need.length >> 1] ?? 0), chosen: c.id === crop.id }
+  }).sort((x, y) => y.yieldPct - x.yieldPct || x.droughtYears - y.droughtYears)
+
+  // --- budżet wody na nawadnianie: ile naprawdę trzeba, ile to prądu ---
+  const needTyp = irrigMedian * 10 * inp.areaHa, needDry = irrigDry * 10 * inp.areaHa // m³
+  const KWH = 0.4 // kWh na 1 m³: pompa głębinowa + ciśnienie w deszczowni (przyjęte orientacyjnie)
+  const used = f.irrigUsed
+  if (used !== null || crop.irrigationSense !== 'niska' || irrigation.decision === 'tak' || irrigation.decision === 'przygotuj') {
+    const over = used !== null ? used - needDry : 0
+    recs.push({
+      group: 'nawadnianie', icon: '📏', priority: used !== null && over > 0 ? 1 : 2, causes: ['studnie', 'historia'],
+      title: used !== null && over > 0 ? `Nawadniasz za dużo: ok. ${r0(over)} m³ ponad potrzebę` : 'Budżet wody na nawadnianie w sezonie',
+      why: `Z symulacji 10 lat: ${crop.short} na tej działce (${inp.areaHa.toFixed(1)} ha) potrzebuje w typowym sezonie ok. ${r0(needTyp)} m³ wody z nawadniania (${r0(irrigMedian)} mm), w suchym roku ok. ${r0(needDry)} m³. ` +
+        (used !== null ? (over > 0 ? `Podajesz ${r0(used)} m³ — to więcej niż potrzeba nawet w suchym roku. Nadwyżka nie zwiększa plonu, a wypłukuje azot i obniża wody gruntowe.` : `Podajesz ${r0(used)} m³ — to w granicach potrzeb.`) : 'Lej według zaleceń z raportu (dawka i termin), nie „na oko”.'),
+      effect: used !== null && over > 0 ? `oszczędność ok. ${r0(over)} m³ wody i ${r0(over * KWH)} kWh prądu na pompowanie w sezonie` : `pompowanie tej wody to ok. ${r0(needTyp * KWH)}–${r0(needDry * KWH)} kWh prądu w sezonie (przyjęto ${KWH} kWh/m³)`,
+      when: 'nawadniaj nocą (mniej parowania, tańsza taryfa nocna); linia kroplująca zużywa zwykle o 20–40% mniej wody niż deszczownia',
+    })
+  }
+
   // --- ograniczenia ---
   const limits = [
     f.drainage === 'nie wiem' ? 'Nie wiemy, czy pole jest zdrenowane — dreny przyspieszają odpływ wody i mogą pogarszać sytuację (możesz to podać w „Doprecyzuj raport”).' : null,
@@ -587,26 +693,27 @@ export function assess(inp: AssessInput): Assessment {
       ? 'Opad pochodzi z reanalizy ERA5 (siatka ok. 9–25 km) — lokalna burza mogła dać inny opad (możesz podać własny pomiar w „Doprecyzuj raport”).'
       : `Opad z ostatnich 7 dni wg Twojego pomiaru (${r0(f.rain7)} mm); wcześniejsze dni — reanaliza ERA5.`,
     soil.source === 'rolnik' ? `Gleba wg Twojej oceny (${soil.texture.replace(' (wg rolnika)', '')}); próchnica z SoilGrids.` : soil.source === 'SoilGrids' ? 'Gleba z SoilGrids 250 m (model globalny) — możesz ją poprawić w „Doprecyzuj raport”, jeśli znasz swoją glebę.' : 'Brak danych glebowych — przyjęto glebę średnią (możesz ją podać w „Doprecyzuj raport”).',
-    !inp.demFine ? `Teren: ${inp.demLabel}.` : null,
+    !inp.demFine ? 'Teren z europejskiego modelu 30 m (Copernicus DEM) — wystarcza do spadków i kierunków spływu; rowy i drobne zagłębienia mogą być niewidoczne (przy mapie można pobrać szczegółowy model 1 m).' : null,
     sat.ageDays !== null && sat.ageDays > 15 ? `Najnowsze bezchmurne zdjęcie satelitarne ma ${sat.ageDays} dni — w ocenie ma mniejszą wagę.` : null,
     sat.ndvi !== null && sat.ndviRef !== null && sat.ndvi < sat.ndviRef - 0.25 ? `Na zdjęciu łan wygląda dużo słabiej niż wzorzec dla uprawy „${crop.short}” — sprawdź, czy wybrana uprawa się zgadza.` : null,
-    smNow && smNow.lag > 3 ? `Wilgotność gleby ERA5-Land pochodzi z ${smNow.lag} dni przed datą analizy (opóźnienie publikacji danych).` : null,
+    smNow && smNow.lag > 3 ? `Wilgotność gleby (${w.smLabel}) pochodzi z ${smNow.lag} dni przed datą analizy (opóźnienie publikacji danych).` : null,
     ...inp.missing,
   ].filter((x): x is string => !!x)
 
   return {
     date, crop, phase: phaseAt(crop, doy), active,
-    status: { sev, title: active ? SEV_LABEL[sev] : sev >= 2 ? 'Sucho przed sezonem' : 'Poza sezonem — zapas w normie', text: statusText, confidence, confidenceWhy },
+    status: { sev, title: active ? SEV_LABEL[sev] : sev >= 2 ? 'Sucho (uprawa poza sezonem)' : 'Poza sezonem — zapas w normie', text: statusText, confidence, confidenceWhy },
     indicators: [
       { key: 'gleba', label: 'Woda w glebie (model)', value: active ? `${cur.availPct}%` : '—', detail: active ? `zapas wody dostępnej w strefie korzeni (próg stresu: ${100 - Math.round(crop.p * 100)}%)` : 'uprawa poza sezonem wegetacji', sev: soilSev, source: 'FAO-56, ERA5, SoilGrids' },
       { key: 'klimat', label: 'Opad − parowanie, 30 dni', value: `${sign(kbw30)} mm`, detail: `${kbw30hist.filter((x) => x < kbw30).length === 0 ? 'najsuchszy taki okres od 10 lat' : `bardziej sucho było w ${kbw30hist.filter((x) => x < kbw30).length} z ${kbw30hist.length} lat`}`, sev: climSev, source: 'Open-Meteo ERA5, 10 lat' },
-      { key: 'wilgotnosc', label: 'Wilgotność gleby do 1 m', value: smNow ? `${Math.round(smNow.v * 100)}% obj.` : '—', detail: smNow ? (smHist.length ? `${smDrier === 0 ? 'najsuchsza w tym terminie od 10 lat' : `bardziej sucho było w ${smDrier} z ${smHist.length} lat`} (ERA5-Land)` : 'ERA5-Land') : 'brak danych ERA5-Land dla tej daty', sev: smSev, source: 'Open-Meteo ERA5-Land, 10 lat' },
+      { key: 'wilgotnosc', label: 'Wilgotność gleby do 1 m', value: smNow ? (w.smLabel === 'ERA5-Land' ? `${Math.round(smNow.v * 100)}% obj.` : `${Math.round(smNow.v * 100)}/100`) : '—', detail: smNow ? (smHist.length ? `${smDrier === 0 ? 'najsuchsza w tym terminie od 10 lat' : `bardziej sucho było w ${smDrier} z ${smHist.length} lat`} (${w.smLabel})` : w.smLabel) : `brak danych ${w.smLabel} dla tej daty`, sev: smSev, source: `${w.smLabel}, 10 lat` },
       { key: 'satelita', label: 'Wilgotność roślin (NDMI)', value: sat.ndmi !== null ? sat.ndmi.toFixed(2) : '—', detail: sat.ndmi !== null && sat.ndmiRef !== null ? `norma dla uprawy ok. ${sat.ndmiRef.toFixed(2)} · zdjęcie z ${sat.scene?.date}${sat.ageDays !== null && sat.ageDays > 15 ? ` (${sat.ageDays} dni temu)` : ''}${sat.ndvi !== null && sat.ndviRef !== null && sat.ndvi < sat.ndviRef - 0.25 ? ' · uwaga: łan dużo słabszy od wzorca — możliwa inna uprawa niż wskazana' : ''}` : sat.note, sev: sat.sev, source: 'Sentinel-2 L2A' },
     ],
     current: cur,
     climate: { kbw30, kbw30pct, kbw60, kbw60pct, p30, p30norm, hot30, hot30norm, drySpell },
     history: { rows, droughtYears, months, riskMonths, irrigMedian, irrigDry },
     seasonal: S,
+    period, cropRank,
     sat, causes, recs: recs.sort((a, b) => order(a.group) - order(b.group) || a.priority - b.priority), irrigation, series, limits,
   }
 }

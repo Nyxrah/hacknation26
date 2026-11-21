@@ -52,11 +52,14 @@ export interface TexOpts {
   ndmiYear?: number
 }
 
+/** Skala tekstury: ok. 1600 px na dłuższy bok niezależnie od rozdzielczości terenu (gładko, bez „pikseli”). */
+export const texScale = (A: Analysis) => Math.max(2, Math.min(16, Math.round(1600 / Math.max(A.g.w, A.g.h))))
+
 /** Rysuje warstwę na canvasie w rozdzielczości siatki × scale. */
 export function drawLayer(A: Analysis, layer: Layer, o: TexOpts): HTMLCanvasElement {
   const { g, mask } = A
   const { w, h } = g
-  const S = o.scale ?? 2
+  const S = o.scale ?? texScale(A)
   const base = document.createElement('canvas')
   base.width = w
   base.height = h
@@ -109,26 +112,47 @@ export function drawLayer(A: Analysis, layer: Layer, o: TexOpts): HTMLCanvasElem
   if (layer === 'orto' && o.ortho) {
     cx.drawImage(o.ortho, 0, 0, cv.width, cv.height)
     // delikatne cieniowanie rzeźby na ortofoto
-    cx.globalAlpha = 0.25
+    cx.globalAlpha = 0.12
     cx.globalCompositeOperation = 'multiply'
     cx.drawImage(base, 0, 0, cv.width, cv.height)
     cx.globalAlpha = 1
     cx.globalCompositeOperation = 'source-over'
   } else cx.drawImage(base, 0, 0, cv.width, cv.height)
 
+  const ctr = (i: number): [number, number] => { const r = (i / w) | 0, c = i - r * w; return [(c + 0.5) * S, (r + 0.5) * S] }
   if (o.channels !== false && layer !== 'flow') {
-    cx.fillStyle = 'rgba(103,232,249,0.55)'
-    for (let i = 0; i < w * h; i++) if (A.channel[i]) {
-      const r = (i / w) | 0, c = i - r * w
-      cx.fillRect(c * S, r * S, S, S)
+    // cieki jako gładkie linie wzdłuż kierunku spływu (zamiast kwadratów)
+    cx.lineCap = 'round'
+    cx.lineJoin = 'round'
+    cx.strokeStyle = 'rgba(56,170,235,0.85)'
+    cx.shadowColor = 'rgba(255,255,255,0.6)'
+    cx.shadowBlur = Math.max(2, S * 0.4)
+    cx.beginPath()
+    for (let i = 0; i < w * h; i++) {
+      if (!A.channel[i]) continue
+      const j = A.dir[i]
+      if (j < 0) continue
+      const [x1, y1] = ctr(i), [x2, y2] = ctr(j)
+      cx.moveTo(x1, y1)
+      cx.lineTo(x2, y2)
     }
+    cx.lineWidth = Math.max(2, S * 0.45)
+    cx.stroke()
+    cx.shadowBlur = 0
   }
   if (o.highlight?.length) {
+    // miejsca retencji jako miękka plama
     cx.fillStyle = o.highlightColor ?? 'rgba(250,204,21,0.75)'
+    cx.shadowColor = o.highlightColor ?? 'rgba(250,204,21,0.75)'
+    cx.shadowBlur = S
+    cx.beginPath()
     for (const i of o.highlight) {
-      const r = (i / w) | 0, c = i - r * w
-      cx.fillRect(c * S, r * S, S, S)
+      const [x, y] = ctr(i)
+      cx.moveTo(x + S * 0.75, y)
+      cx.arc(x, y, S * 0.75, 0, Math.PI * 2)
     }
+    cx.fill()
+    cx.shadowBlur = 0
   }
   if (o.outline !== false) {
     cx.beginPath()
@@ -138,7 +162,7 @@ export function drawLayer(A: Analysis, layer: Layer, o: TexOpts): HTMLCanvasElem
       else cx.moveTo(X, Y)
     })
     cx.closePath()
-    cx.lineWidth = 3 * (S / 2)
+    cx.lineWidth = Math.max(3, Math.min(8, 1600 / 400))
     cx.strokeStyle = '#ffffff'
     cx.shadowColor = 'rgba(0,0,0,0.6)'
     cx.shadowBlur = 6
@@ -149,7 +173,7 @@ export function drawLayer(A: Analysis, layer: Layer, o: TexOpts): HTMLCanvasElem
 }
 
 /** Wycinek z ramką działki (do widoku podzielonego i paszportu). */
-export function cropToParcel(A: Analysis, cv: HTMLCanvasElement, pad = 25, S = 2) {
+export function cropToParcel(A: Analysis, cv: HTMLCanvasElement, pad = 25, S = texScale(A)) {
   const { g } = A
   const xs = A.raw.parcel.ring.map((p) => p[0]), ys = A.raw.parcel.ring.map((p) => p[1])
   const c0 = Math.max(0, ((Math.min(...xs) - pad - g.x0) / g.res) * S)

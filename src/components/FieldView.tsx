@@ -28,8 +28,8 @@ export function FieldView({ A, hsg, highlight }: { A: Analysis; hsg: 'A' | 'B' |
   const texture = useMemo(() => drawLayer(A, layer === 'orto' && !ortho ? 'flow' : layer, { ortho, shade, highlight, highlightColor: 'rgba(250,204,21,0.8)' }), [A, layer, ortho, shade, highlight])
   const printMap = useMemo(() => cropToParcel(A, drawLayer(A, ortho ? 'orto' : 'flow', { ortho, shade, highlight: Int32Array.from(A.interventions.flatMap((i) => Array.from(i.cells))) }), 40).toDataURL('image/jpeg', 0.85), [A, ortho, shade])
   const damSim = useMemo(() => (A.dam ? A.dam.sim(0.8) : null), [A])
-  const out30 = runoffM3(30, hsg, A.parcelCells, A.g.res)
-  const kept = damSim && A.dam ? Math.min(damSim.volume, runoffM3(30, hsg, A.dam.catchmentCells, A.g.res)) : 0
+  const out30 = runoffM3(30, hsg, A.parcelCells, A.g.res, A.cnTable)
+  const kept = damSim && A.dam ? Math.min(damSim.volume, runoffM3(30, hsg, A.dam.catchmentCells, A.g.res, A.cnTable)) : 0
   const r10 = (v: number) => (Math.round(v / 10) * 10).toLocaleString('pl-PL')
 
   return (

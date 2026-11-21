@@ -39,6 +39,7 @@ export interface RawInputs {
   waterways?: XY[][]
   neighbors?: Parcel[]
   hsg?: 'A' | 'B' | 'C' | 'D'
+  cn?: Record<'A' | 'B' | 'C' | 'D', number> // CN zależne od uprawy
   lat: number
   lng: number
   cached?: boolean

@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CropId } from './geo/crops'
 import { CROPS } from './geo/crops'
-import { refine, runAnalysis, type Result, type StepId } from './geo/loader'
+import { refine, runAnalysis, upgradeTerrain, type Result, type StepId } from './geo/loader'
 import { NO_FARMER, type FarmerInput } from './geo/assess'
 import type { Parcel } from './geo/types'
 import { StartPage } from './components/StartPage'
 import { ReportPage, type StepState } from './components/ReportPage'
 import { sevOf } from './components/ui'
 
-interface Saved { id: string; parcel: Parcel; crop: CropId; date: string; status: string; sev: number; savedAt: string }
+interface Saved { id: string; parcel: Parcel; crop: CropId; date: string; from?: string; status: string; sev: number; savedAt: string }
 const KEY = 'bank-wody:raporty'
 const loadSaved = (): Saved[] => { try { return JSON.parse(localStorage.getItem(KEY) ?? '[]') } catch { return [] } }
 
@@ -33,7 +33,7 @@ export default function App() {
   const [err, setErr] = useState('')
   const [saved, setSaved] = useState<Saved[]>(loadSaved)
   const [showSaved, setShowSaved] = useState(false)
-  const [last, setLast] = useState<{ parcel: Parcel; crop: CropId; date: string } | null>(null)
+  const [last, setLast] = useState<{ parcel: Parcel; crop: CropId; date: string; from?: string } | null>(null)
   const runId = useRef(0)
 
   useEffect(() => {
@@ -42,19 +42,19 @@ export default function App() {
     return () => clearInterval(id)
   }, [phase, res?.done])
 
-  const run = async (parcel: Parcel, crop: CropId, date: string) => {
+  const run = async (parcel: Parcel, crop: CropId, date: string, from?: string) => {
     const my = ++runId.current
-    setLast({ parcel, crop, date })
+    setLast({ parcel, crop, date, from })
     setPhase('report')
     setSteps({ uldk: { state: 'ok' } })
-    setRes({ parcel, date, cropId: crop, lat: 0, lng: 0, demLabel: '', demFine: false, sources: [], missing: [], seconds: 0, generatedAt: '', done: false, farmer: NO_FARMER })
+    setRes({ parcel, date, cropId: crop, lat: 0, lng: 0, demLabel: '', demFine: false, sources: [], missing: [], seconds: 0, generatedAt: '', done: false, farmer: NO_FARMER, from })
     setT0(performance.now())
     setNow(performance.now())
     window.scrollTo({ top: 0 })
     try {
       await runAnalysis(parcel, date, crop,
         (s: StepId, st, note) => my === runId.current && setSteps((p) => ({ ...p, [s]: { state: st, note } })),
-        (r) => my === runId.current && setRes(r))
+        (r) => my === runId.current && setRes(r), NO_FARMER, from)
     } catch (e) {
       if (my !== runId.current) return
       setErr((e as Error).message)
@@ -64,12 +64,12 @@ export default function App() {
 
   const save = () => {
     if (!res?.R) return
-    const s: Saved = { id: `${res.parcel.id}|${res.date}|${res.cropId}`, parcel: res.parcel, crop: res.cropId, date: res.date, status: res.R.status.title, sev: res.R.status.sev, savedAt: new Date().toLocaleString('pl-PL') }
+    const s: Saved = { id: `${res.parcel.id}|${res.from ?? ''}|${res.date}|${res.cropId}`, parcel: res.parcel, crop: res.cropId, date: res.date, from: res.from, status: res.R.status.title, sev: res.R.status.sev, savedAt: new Date().toLocaleString('pl-PL') }
     const next = [s, ...saved.filter((x) => x.id !== s.id)].slice(0, 30)
     setSaved(next)
     localStorage.setItem(KEY, JSON.stringify(next))
   }
-  const isSaved = !!res && saved.some((x) => x.id === `${res.parcel.id}|${res.date}|${res.cropId}`)
+  const isSaved = !!res && saved.some((x) => x.id === `${res.parcel.id}|${res.from ?? ''}|${res.date}|${res.cropId}`)
 
   return (
     <div className="min-h-full">
@@ -92,9 +92,9 @@ export default function App() {
             <div className="card max-h-[50vh] overflow-auto p-3">
               {!saved.length && <div className="p-3 text-muted">Nie masz jeszcze zapisanych raportów. Zapisują się tylko na tym komputerze (bez konta, bez danych osobowych).</div>}
               {saved.map((s) => (
-                <button key={s.id} onClick={() => { setShowSaved(false); run(s.parcel, s.crop, s.date) }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-paper">
+                <button key={s.id} onClick={() => { setShowSaved(false); run(s.parcel, s.crop, s.date, s.from) }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-paper">
                   <span className="text-[22px]">{CROPS[s.crop].icon}</span>
-                  <span className="flex-1"><b>{s.parcel.id}</b> · {CROPS[s.crop].name} · {s.date}<br /><span className="text-[14px] text-muted">gm. {s.parcel.commune} · zapisano {s.savedAt}</span></span>
+                  <span className="flex-1"><b>{s.parcel.id}</b> · {CROPS[s.crop].name} · {s.from ? `${s.from} – ` : ''}{s.date}<br /><span className="text-[14px] text-muted">gm. {s.parcel.commune} · zapisano {s.savedAt}</span></span>
                   <span className="text-[14px] font-semibold" style={{ color: sevOf(s.sev as 0).color }}>{s.status}</span>
                   <span className="text-[14px] font-semibold text-field">przelicz ponownie →</span>
                 </button>
@@ -114,7 +114,7 @@ export default function App() {
 
       <main className="mx-auto max-w-[1240px] px-4 md:px-6">
         {phase === 'start' && <StartPage onRun={run} initial={last} />}
-        {phase === 'report' && res && <ReportPage res={res} steps={steps} elapsed={now - t0} onRefine={(f: FarmerInput) => setRes((r) => (r ? refine(r, f) : r))} />}
+        {phase === 'report' && res && <ReportPage res={res} steps={steps} elapsed={now - t0} onRefine={(f: FarmerInput) => setRes((r) => (r ? refine(r, f) : r))} onUpgradeTerrain={async () => { const r2 = await upgradeTerrain(res); setRes(r2) }} />}
         {phase === 'error' && (
           <div className="card mx-auto mt-16 max-w-xl p-8 text-center">
             <div className="text-[40px]">😕</div>
@@ -122,7 +122,7 @@ export default function App() {
             <p className="mt-2 text-muted">{err}</p>
             <div className="mt-6 flex justify-center gap-3">
               <button className="btn-ghost" onClick={() => setPhase('start')}>Wróć</button>
-              {last && <button className="btn-primary" onClick={() => run(last.parcel, last.crop, last.date)}>Spróbuj ponownie</button>}
+              {last && <button className="btn-primary" onClick={() => run(last.parcel, last.crop, last.date, last.from)}>Spróbuj ponownie</button>}
             </div>
           </div>
         )}

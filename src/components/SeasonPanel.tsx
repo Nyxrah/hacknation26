@@ -88,7 +88,7 @@ export function SeasonPanel({ res }: { res: Result }) {
         <ul className="mt-3 space-y-1.5 text-[15px]">
           {G.advice.map((a) => <li key={a} className="flex gap-2"><span>•</span><span>{a}</span></li>)}
         </ul>
-        <Info>Pomiary poziomu wody w studniach monitoringu PIG-PIB nie są publicznie dostępne, dlatego to wskaźnik pośredni: bilans wodny z 12 miesięcy, wilgotność warstwy 1–2,5 m (ERA5-Land) i zasilanie zimowe na tle 10 lat. Zbiorniki: PIG-PIB (GZWP/LZWP).</Info>
+        <Info>Pomiary poziomu wody w studniach monitoringu PIG-PIB nie są publicznie dostępne, dlatego to wskaźnik pośredni: bilans wodny z 12 miesięcy, wilgotność głębokiej warstwy gleby (ERA5-Land albo NASA POWER) i zasilanie zimowe na tle 10 lat. Zbiorniki: PIG-PIB (GZWP/LZWP).</Info>
       </div>
     </div>
   )

@@ -105,3 +105,13 @@ export function phaseAt(c: Crop, doy: number) {
   if (doy < c.critical[0]) return 'wzrost przed okresem krytycznym'
   return 'dojrzewanie'
 }
+
+/** Liczba CN zależna od uprawy (USDA TR-55): okopowe w rzędach spływają najbardziej, łąka najmniej. */
+export type Hsg = 'A' | 'B' | 'C' | 'D'
+const CN_ROW: Record<Hsg, number> = { A: 67, B: 78, C: 85, D: 89 }
+const CN_GRAIN: Record<Hsg, number> = { A: 63, B: 75, C: 83, D: 87 }
+const CN_MEADOW: Record<Hsg, number> = { A: 30, B: 58, C: 71, D: 78 }
+export function cnFor(c: Crop): Record<Hsg, number> {
+  return c.id === 'kukurydza' || c.id === 'ziemniak' || c.id === 'burak' ? CN_ROW : c.id === 'laka' ? CN_MEADOW : CN_GRAIN
+}
+export const cnGroupName = (c: Crop) => (c.id === 'kukurydza' || c.id === 'ziemniak' || c.id === 'burak' ? 'uprawa w rzędach (okopowa)' : c.id === 'laka' ? 'trwała roślinność (łąka)' : 'zboża / rzepak (łan zwarty)')

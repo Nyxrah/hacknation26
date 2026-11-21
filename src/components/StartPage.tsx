@@ -17,11 +17,14 @@ const EXAMPLES = [
 const today = () => new Date().toISOString().slice(0, 10)
 const minDate = () => `${new Date().getFullYear() - 10}-01-01`
 
-export function StartPage({ onRun, initial }: { onRun: (p: Parcel, crop: CropId, date: string) => void; initial?: { parcel: Parcel; crop: CropId; date: string } | null }) {
+export function StartPage({ onRun, initial }: { onRun: (p: Parcel, crop: CropId, date: string, from?: string) => void; initial?: { parcel: Parcel; crop: CropId; date: string; from?: string } | null }) {
   const [q, setQ] = useState(initial?.parcel.id ?? '')
   const [parcel, setParcel] = useState<Parcel | null>(initial?.parcel ?? null)
   const [crop, setCrop] = useState<CropId | null>(initial?.crop ?? null)
   const [date, setDate] = useState(initial?.date ?? today())
+  const [mode, setMode] = useState<'dzien' | 'okres'>(initial?.from ? 'okres' : 'dzien')
+  const [from, setFrom] = useState(initial?.from ?? `${new Date().getFullYear()}-04-01`)
+  const periodOk = mode === 'dzien' || (from >= minDate() && from < date)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -51,7 +54,7 @@ export function StartPage({ onRun, initial }: { onRun: (p: Parcel, crop: CropId,
   // teren i gleba zaczynają się pobierać od razu — zanim rolnik wybierze uprawę i datę
   useEffect(() => { if (parcel) prefetch(parcel) }, [parcel])
 
-  const ready = parcel && crop && date
+  const ready = parcel && crop && date && periodOk
   return (
     <div className="pb-16">
       <div className="py-8 md:py-12">
@@ -112,17 +115,26 @@ export function StartPage({ onRun, initial }: { onRun: (p: Parcel, crop: CropId,
           </div>
 
           {/* krok 3 */}
-          <div className="mt-8"><Step n={3} title="Na jaki dzień?" done /></div>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button onClick={() => setDate(today())} className={`rounded-xl border-2 px-4 py-2.5 font-semibold ${date === today() ? 'border-field bg-field-soft text-field-dark' : 'border-line bg-white'}`}>Dziś</button>
-            <label className="flex items-center gap-2 text-[15px] text-muted">
-              albo inny dzień:
+          <div className="mt-8"><Step n={3} title="Na jaki dzień lub okres?" done={periodOk} /></div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={() => { setMode('dzien'); setDate(today()) }} className={`rounded-xl border-2 px-4 py-2.5 font-semibold ${mode === 'dzien' && date === today() ? 'border-field bg-field-soft text-field-dark' : 'border-line bg-white'}`}>Dziś</button>
+            <button onClick={() => setMode('dzien')} className={`rounded-xl border-2 px-4 py-2.5 font-semibold ${mode === 'dzien' && date !== today() ? 'border-field bg-field-soft text-field-dark' : 'border-line bg-white'}`}>Wybrany dzień</button>
+            <button onClick={() => setMode('okres')} className={`rounded-xl border-2 px-4 py-2.5 font-semibold ${mode === 'okres' ? 'border-field bg-field-soft text-field-dark' : 'border-line bg-white'}`}>Okres (od – do)</button>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-[15px] text-muted">
+            {mode === 'okres' && (
+              <label className="flex items-center gap-2">od
+                <input type="date" value={from} min={minDate()} max={date} onChange={(e) => e.target.value && setFrom(e.target.value)} className="rounded-xl border-2 border-line bg-white px-3 py-2 text-[16px] text-ink outline-none focus:border-field" />
+              </label>
+            )}
+            <label className="flex items-center gap-2">{mode === 'okres' ? 'do' : 'dzień'}
               <input type="date" value={date} min={minDate()} max={today()} onChange={(e) => e.target.value && setDate(e.target.value)} className="rounded-xl border-2 border-line bg-white px-3 py-2 text-[16px] text-ink outline-none focus:border-field" />
             </label>
           </div>
-          <p className="mt-2 text-[14px] text-muted">Możesz sprawdzić dowolny dzień z ostatnich 10 lat — np. jak było w suszy 2018 r.</p>
+          <p className="mt-2 text-[14px] text-muted">{mode === 'okres' ? 'Podsumujemy cały okres (kilka dni, sezon albo kilka lat) na tle 10 wcześniejszych lat, a stan wody pokażemy na jego ostatni dzień.' : 'Możesz sprawdzić dowolny dzień z ostatnich 10 lat — np. jak było w suszy 2018 r.'}</p>
+          {!periodOk && <p className="mt-1 text-[14px] text-bad">Początek okresu musi być wcześniej niż koniec (najdalej 10 lat wstecz).</p>}
 
-          <button className="btn-primary mt-8 w-full py-4 text-[19px]" disabled={!ready} onClick={() => ready && onRun(parcel!, crop!, date)}>
+          <button className="btn-primary mt-8 w-full py-4 text-[19px]" disabled={!ready} onClick={() => ready && onRun(parcel!, crop!, date, mode === 'okres' ? from : undefined)}>
             Sprawdź moje pole →
           </button>
           {!ready && <p className="mt-2 text-center text-[14px] text-muted">{!parcel ? 'Najpierw wskaż działkę.' : 'Wybierz uprawę.'}</p>}

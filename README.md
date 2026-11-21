@@ -39,7 +39,7 @@ hostów (to nie jest otwarte proxy) i buforuje odpowiedzi na dysku (`cache/`).
 ## 2. Funkcjonalności
 
 1. **Wybór działki**: numer ewidencyjny (ULDK GUGiK) albo kliknięcie na mapie z nałożonymi granicami działek (KIEG).
-2. **Wybór uprawy** (8 najczęstszych: pszenica, żyto/pszenżyto, jęczmień jary, rzepak, kukurydza, ziemniak, burak, łąka) i **daty analizy** (dziś albo dowolny dzień z 10 lat).
+2. **Wybór uprawy** (8 najczęstszych: pszenica, żyto/pszenżyto, jęczmień jary, rzepak, kukurydza, ziemniak, burak, łąka) i **terminu**: dziś, dowolny dzień z 10 lat albo **okres od–do dowolnej długości** (dni, sezon, kilka lat). Dla okresu raport ma osobne podsumowanie: opad, bilans opad − parowanie, dni stresu uprawy, niedobór wody (m³ na działce), spływ, przymrozki i upały na tle tych samych dni w 10 wcześniejszych latach, a dla okresów wieloletnich tabelę rok po roku.
 3. **Ocena stanu wilgotności** na dzień analizy z czterech niezależnych wskaźników:
    - **woda w glebie**: dobowy bilans wodny FAO-56 dla wybranej uprawy (Kc wg fazy rozwoju, głębokość korzeni) i pojemności wodnej gleby z SoilGrids (funkcje pedotransferowe Saxton & Rawls 2006), od 1 marca do dnia analizy;
    - **klimatyczny bilans wodny** (opad − ET₀) z 30 i 60 dni na tle tych samych okresów w 10 poprzednich latach (percentyl), plus upały i okresy bezopadowe;
@@ -48,7 +48,7 @@ hostów (to nie jest otwarte proxy) i buforuje odpowiedzi na dysku (`cache/`).
    - Wynik łączny w 4 klasach plus **pewność** (wysoka / średnia / niska) zależna od liczby dostępnych i zgodnych wskaźników.
 4. **Podatność historyczna (10 lat)**: symulacja każdego sezonu dla tej uprawy i gleby, czyli liczba dni stresu w okresie krytycznym, lata suszy (np. „5 z 10”), miesiące największego ryzyka i średnie / suche zapotrzebowanie na nawadnianie.
 5. **Identyfikacja przyczyn**: deficyt opadów i upał, słaba retencja gleby, spływ powierzchniowy (spadki, punkty wyjścia wody), wrażliwa faza uprawy, nawracająca susza, drenaż (jeśli rolnik go potwierdzi). Każda przyczyna ma liczby i dane, z których wynika.
-5a. **„Doprecyzuj raport”**: pięć pytań, na które rolnik zna odpowiedź lepiej niż jakakolwiek baza danych: *czy pole jest zdrenowane*, *jaka jest gleba*, *ile deszczu spadło w ostatnim tygodniu (własny deszczomierz)*, *orka czy uprawa bezorkowa*, *czy przy polu rosną wierzby lub topole*. Raport przelicza się w ułamku sekundy, bez ponownego pobierania danych. Drenaż dodaje przyczynę i zalecenie *regulowanego odpływu z drenów*; gleba zastępuje SoilGrids; opad zastępuje ERA5 w ostatnich 7 dniach.
+5a. **„Doprecyzuj raport”**: sześć pytań, na które rolnik zna odpowiedź lepiej niż jakakolwiek baza danych: *czy pole jest zdrenowane*, *jaka jest gleba*, *ile deszczu spadło w ostatnim tygodniu (własny deszczomierz)*, *orka czy uprawa bezorkowa*, *czy przy polu rosną wierzby lub topole*, *ile wody zużywasz na nawadnianie*. Raport przelicza się w ułamku sekundy, bez ponownego pobierania danych. Drenaż dodaje przyczynę i zalecenie *regulowanego odpływu z drenów*; gleba zastępuje SoilGrids; opad zastępuje ERA5 w ostatnich 7 dniach.
 6. **Rekomendacje retencyjne** z analizy terenu: zastawka / próg na cieku (pojemność z symulacji piętrzenia na NMT), oczko w naturalnym obniżeniu (zlewnia, objętość), pas zadrzewień wzdłuż poziomicy. Każda podana jest z **zakresem m³**, efektem rocznym i formalnościami.
 7. **Rekomendacje agrotechniczne** zależne od gleby, uprawy, spadku i stanu wody: resztki pożniwne i mulcz, międzyplon, próchnica (z wyliczonym przyrostem zapasu wody dla tej gleby), uprawa uproszczona, uprawa w poprzek stoku, wałowanie, dobór odmian i terminu siewu, nawożenie pod deszcz.
 8. **Nawadnianie** (opcjonalne): decyzja tak / przygotuj / nie / poza sezonem, dawka w mm i m³/ha, prognoza opadu na 7 dni (dla daty bieżącej), sezonowe zapotrzebowanie i uwaga prawna.
@@ -57,7 +57,9 @@ hostów (to nie jest otwarte proxy) i buforuje odpowiedzi na dysku (`cache/`).
    - **śnieg i roztopy**: model pokrywy śnieżnej metodą stopniodni. Śnieg nie trafia do gleby od razu, tylko w czasie roztopów, a bilans wodny i spływ liczone są z wody, która faktycznie dociera do gleby. Raport pokazuje, ile śniegu spadło tej zimy na tle 10 lat, ile wody dały roztopy (mm i m³ na działce), ile jest jej teraz w śniegu, i zaleca **zatrzymanie wody z roztopów** (zastawki, dreny, ściernisko / międzyplon);
    - **studnie i wody podziemne**: wskaźnik pośredni (bilans opad − parowanie z 12 miesięcy, wilgotność warstwy 1–2,5 m z ERA5-Land, zasilanie zimowe) na tle 10 lat, plus **główny zbiornik wód podziemnych pod działką** (PIG-PIB, GZWP/LZWP). Zalecenie: *ograniczyć pobór / korzystać oszczędnie / można korzystać* oraz zasady prawne (5 m³/dobę, studnie > 30 m);
    - **opady w kolejnych latach** hydrologicznych (XI–X), w podziale na deszcz i śnieg.
-8b. **Praktyki gospodarstwa** (też z konsultacji z rolnikami):
+8b. **Która uprawa pasuje do wody na tej działce**: ta sama gleba, teren i pogoda z 10 lat, symulacja dla 8 upraw bez nawadniania, czyli % plonu możliwego, lata suszy i potrzeba nawadniania. Rolnik widzi, czy jego uprawa jest dobrze dobrana do zasobów wody.
+8c. **Budżet wody i prądu na nawadnianie**: ile wody ta uprawa naprawdę potrzebuje w typowym i suchym roku (m³ na działce) i ile to kWh pompowania. Rolnik może wpisać, ile faktycznie zużywa, a raport pokaże nadwyżkę (ochrona wód podziemnych, oszczędność prądu).
+8d. **Praktyki gospodarstwa** (też z konsultacji z rolnikami):
    - **uprawa bezorkowa jako symulacja „co by było, gdyby”**: ta sama symulacja 10 lat liczona dla orki i dla uprawy bezorkowej (resztki na powierzchni: CN −4 wg tabel USDA, parowanie z gleby −15% wg FAO-56) daje różnicę w dniach stresu, latach suszy i spływie, liczoną dla tej działki;
    - **wierzby i topole**: pytanie, czy rosną przy polu. Na suchych polach (gleba kat. I–II, częste susze, niskie wody podziemne) raport wskazuje strefę konkurencji o wodę (20–30 m) i co z nią zrobić; w pasach zadrzewień dobiera gatunki do wilgotności (na suchych polach mało wodochłonne, wierzby tylko w miejscach podmokłych);
    - **woda do oprysków z deszczówki lub zbiornika, nie ze studni**: zużycie wody na opryski dla tej działki i uprawy (liczba zabiegów × 250 l/ha), potrzebna powierzchnia dachu przy lokalnym opadzie i liczba sezonów, na które wystarczy proponowane oczko.
@@ -84,22 +86,22 @@ server.mjs                serwer statyczny + proxy z cache dla usług bez CORS (
 scripts/raport.ts         ten sam silnik uruchamiany z wiersza poleceń (Node 24 uruchamia TS bezpośrednio)
 ```
 
-**Wymóg 30 s.** Najwolniejsze źródło to NMT 1 m z Geoportalu, który odpowiada w 17–70 s, zależnie od obciążenia. Dlatego:
+**Wymóg 30 s i wskazówka mentora („priorytet szybkość, nie lidar, wystarczy europejski zbiór ~25 m”).** Domyślnie teren pochodzi z **Copernicus DEM GLO-30**, europejskiego modelu 30 m (odczyt wycinka w ~2 s). Szczegółowy NMT 1 m z Geoportalu (lidar, 17–70 s) pobierany jest tylko **na życzenie**, przyciskiem przy mapie pola. Typowy raport: **ok. 10–15 s**. Ponadto:
 
-- **teren i gleba zaczynają się pobierać już w chwili wskazania działki**, zanim rolnik wybierze uprawę i datę (nie zależą od nich), więc zwykle są gotowe przed kliknięciem „Sprawdź”;
+- **teren i gleba zaczynają się pobierać już w chwili wskazania działki**, zanim rolnik wybierze uprawę i datę (nie zależą od nich);
 - pozostałe zapytania startują równolegle;
-- jeśli NMT nie odpowie w 20 s, teren liczony jest na **Copernicus DEM 30 m**, a gdy NMT dotrze, raport **sam się doprecyzowuje**;
 - satelita ma limit 24 s, gleba 15 s, a po ich przekroczeniu raport mówi wprost, czego brakuje;
-- **limity Open-Meteo**: zapytanie o 10 lat danych liczy się jako wiele „wywołań”, więc archiwum pogody idzie przez serwer z trwałym cache (dane historyczne się nie zmieniają), współrzędne są zaokrąglane do siatki 0,05° (sąsiednie działki dzielą cache), a odpowiedź 429 jest automatycznie ponawiana.
+- **limity Open-Meteo**: zapytanie o 10 lat danych liczy się jako ok. 270 „wywołań” darmowego limitu, czyli kilkanaście analiz na godzinę. Dlatego archiwum pogody idzie przez serwer z trwałym cache (dane historyczne się nie zmieniają), współrzędne są zaokrąglane do siatki 0,05° (sąsiednie działki dzielą cache), a gdy Open-Meteo odmówi (429), aplikacja **automatycznie przechodzi na NASA POWER (MERRA-2)** (opad, śnieg, Tmin/Tmax, wilgotność gleby; ET₀ metodą Hargreavesa wg FAO-56) i podaje to w raporcie.
 
 ## 4. Źródła i zakresy danych
 
 | Kategoria (wymóg KOWR) | Źródło | Zakres | Licencja / warunki |
 |---|---|---|---|
 | przestrzenne: działki | ULDK GUGiK (`uldk.gugik.gov.pl`), mapa: KIEG WMS | granica działki, EPSG:2180 | dane publiczne, bezpłatne |
-| przestrzenne: ukształtowanie terenu | NMT 1 m, Geoportal WCS | działka + bufor 200 m, uśrednione do 2 m | bezpłatne, do dowolnego wykorzystania |
-| przestrzenne: teren (zapas) | Copernicus DEM GLO-30 (AWS Open Data) | jw., 30 m | licencja Copernicus DEM (bezpłatna, z atrybucją) |
+| przestrzenne: ukształtowanie terenu | Copernicus DEM GLO-30, europejski model 30 m (AWS Open Data) | działka + bufor 200 m, przeliczone na siatkę 10 m | licencja Copernicus DEM (bezpłatna, z atrybucją) |
+| przestrzenne: teren szczegółowy (na życzenie) | NMT 1 m, Geoportal WCS | jw., uśrednione do 2 m | bezpłatne, do dowolnego wykorzystania |
 | przestrzenne: użytkowanie / podkład | ortofotomapa Geoportal WMS; Esri World Imagery (tylko podkład mapy wyboru) | — | GUGiK: bezpłatne; Esri: warunki Esri (podkład) |
+| meteorologiczne (zapas) | NASA POWER (MERRA-2), `power.larc.nasa.gov` | dobowo: opad, śnieg, Tmin / Tmax, wilgotność gleby (strefa korzeni i profil); ET₀ Hargreaves | dane publiczne NASA (bezpłatne, z podaniem źródła) |
 | meteorologiczne | Open-Meteo: ERA5 i ERA5-Land (archiwum) + model prognozy | dobowo: opad, deszcz, śnieg, ET₀ FAO, Tmin / Tmax / Tśr, wilgotność gleby 0–100 cm i 100–255 cm; od 1 stycznia (rok − 10) do daty analizy, + 7 dni prognozy | CC BY 4.0 |
 | glebowe | ISRIC SoilGrids 2.0 (REST) | ił, piasek, pył 0–60 cm; węgiel organiczny 0–30 cm | CC BY 4.0 |
 | satelitarne | Sentinel-2 L2A, katalog Earth Search (Element 84), COG | B04, B8A, B11, SCL; scena ≤ 30 dni przed datą + scena z suszy 2018 (V–VII) | licencja Copernicus Sentinel (bezpłatna) |
@@ -143,11 +145,13 @@ co aplikacja robi automatycznie w sekcji „Skąd te dane”.
 
 | Ograniczenie | Jak je rozwiązaliśmy | Co zostaje |
 |---|---|---|
-| Teren 30 m, gdy Geoportal jest wolny | prefetch NMT 1 m od chwili wskazania działki + cache serwera + automatyczne doprecyzowanie | DEM 30 m tylko przy awarii lub bardzo dużym obciążeniu Geoportalu |
+| Teren | europejski model 30 m (szybki, zgodnie z zaleceniem mentora); NMT 1 m na życzenie | wąskie rowy i drobne zagłębienia widać dopiero w NMT 1 m |
+| Spływ zależy od rośliny, gleby i spadku | CN zależne od uprawy (okopowe / zboża / łąka, TR-55) × grupa gleby × spadek × wilgotność poprzedzająca | — |
+| Limit zapytań Open-Meteo | cache + automatyczny zapas NASA POWER | przy zapasie ET₀ metodą Hargreavesa zamiast Penmana-Monteitha |
 | Spływ SCS-CN przy „przeciętnej wilgotności” | poprawka CN na wilgotność poprzedzającą (AMC I/II/III wg opadu z 5 dni, USDA NEH-4) dla każdego dnia | — |
 | Brak zdjęcia satelitarnego (chmury) | czwarty wskaźnik: wilgotność gleby ERA5-Land (zawsze dostępna) + okno satelitarne 45 dni z wagą zależną od wieku zdjęcia | bez zdjęcia ocena opiera się na 3 wskaźnikach, co raport mówi wprost |
 | Drenaż podziemny niewidoczny w danych | pytanie do rolnika; „tak” dodaje przyczynę i zalecenie regulowanego odpływu z drenów | przy „nie wiem” raport o tym przypomina |
-| SoilGrids 250 m to model globalny | rolnik może wskazać kategorię gleby (bardzo lekka … ciężka, z podpowiedzią klas bonitacyjnych) | próchnica nadal z SoilGrids |
+| SoilGrids 250 m to model globalny | rolnik może wskazać kategorię gleby (bardzo lekka … ciężka, czarnoziem, z podpowiedzią klas bonitacyjnych); gleby próchniczne rozpoznawane też z danych (węgiel organiczny) | próchnica nadal z SoilGrids |
 | ERA5 ma siatkę 9–25 km, lokalne burze | rolnik może wpisać opad z własnego deszczomierza (ostatnie 7 dni) | wcześniejsze dni z ERA5; docelowo stacje IMGW-PIB |
 | Śnieg liczony jak deszcz | model pokrywy śnieżnej (stopniodni): woda z roztopów trafia do gleby w dniu topnienia | stały współczynnik topnienia 3 mm/°C/dobę |
 | Brak danych o studniach | wskaźnik pośredni z 12-miesięcznego bilansu, ERA5-Land 1–2,5 m i zasilania zimowego + zbiornik GZWP pod działką (PIG-PIB) | pomiary poziomu wody w studniach monitoringu PIG-PIB nie są publicznie dostępne (wymagają zgody GIOŚ) |

@@ -75,6 +75,7 @@ export interface Analysis {
   validation: Validation
   years: YearStat[]
   timings: Record<string, number>
+  cnTable: Record<Hsg, number>
 }
 
 const DR = [-1, -1, 0, 1, 1, 1, 0, -1]
@@ -86,8 +87,8 @@ export function polygonArea(ring: XY[]) {
   return Math.abs(a) / 2
 }
 
-export function runoffM3(P: number, hsg: Hsg, cells: number, res: number) {
-  return (scsRunoff(P, CN_ARABLE[hsg]) / 1000) * cells * res * res
+export function runoffM3(P: number, hsg: Hsg, cells: number, res: number, cnTable: Record<Hsg, number> = CN_ARABLE) {
+  return (scsRunoff(P, cnTable[hsg]) / 1000) * cells * res * res
 }
 
 function spearman(a: number[], b: number[]) {
@@ -119,6 +120,7 @@ export function analyze(raw: RawInputs, onStep?: (k: string) => void): Analysis 
   const tick = (k: string, t0: number) => { T[k] = Math.round(performance.now() - t0); onStep?.(k) }
   const { dem } = raw
   const H: Hsg = raw.hsg ?? 'B'
+  const CNT = raw.cn ?? CN_ARABLE
   const g = { w: dem.w, h: dem.h, x0: dem.x0, y0: dem.y0, res: dem.res }
   const { w, h, res } = g
   const z = dem.data
@@ -221,7 +223,7 @@ export function analyze(raw: RawInputs, onStep?: (k: string) => void): Analysis 
       cell: bestCell,
       capacity: [lo, hi],
       cost: [12000, 35000],
-      perStorm: (P, hsg) => Math.min(hi, runoffM3(P, hsg, catchment, res)),
+      perStorm: (P, hsg) => Math.min(hi, runoffM3(P, hsg, catchment, res, CNT)),
       perYear: [0, 0],
       m3per1000: ((lo + hi) / 2) / ((12000 + 35000) / 2) * 1000,
       formal: 'Wymaga zgłoszenia wodnoprawnego lub pozwolenia (Wody Polskie); na rowie spółki wodnej — uzgodnienie ze spółką.',
@@ -273,7 +275,7 @@ export function analyze(raw: RawInputs, onStep?: (k: string) => void): Analysis 
       cell: pondCell,
       capacity: [lo, hi],
       cost,
-      perStorm: (P, hsg) => Math.min(hi, runoffM3(P, hsg, catchment, res)),
+      perStorm: (P, hsg) => Math.min(hi, runoffM3(P, hsg, catchment, res, CNT)),
       perYear: [0, 0],
       m3per1000: ((lo + hi) / 2) / ((cost[0] + cost[1]) / 2) * 1000,
       formal: `Ok. ${Math.round(area)} m² — do 1000 m² i 3 m głębokości zwykle wystarcza zgłoszenie wodnoprawne; sprawdź MPZP.`,
@@ -302,8 +304,8 @@ export function analyze(raw: RawInputs, onStep?: (k: string) => void): Analysis 
     if (strip.length > maxCells) strip = strip.sort((a, b) => accP[b] - accP[a]).slice(0, maxCells)
     const stripArea = strip.length * res * res
     const length = stripArea / 12
-    const lo = Math.min(stripArea * 0.04, runoffM3(30, H, up, res) * 0.5)
-    const hi = Math.min(stripArea * 0.08, runoffM3(30, H, up, res) * 0.8)
+    const lo = Math.min(stripArea * 0.04, runoffM3(30, H, up, res, CNT) * 0.5)
+    const hi = Math.min(stripArea * 0.08, runoffM3(30, H, up, res, CNT) * 0.8)
     const cost: [number, number] = [Math.round(length * 35 / 100) * 100, Math.round(length * 70 / 100) * 100]
     if (stripArea > 200) {
       interventions.push({
@@ -314,9 +316,9 @@ export function analyze(raw: RawInputs, onStep?: (k: string) => void): Analysis 
         capacity: [lo, Math.max(lo, hi)],
         cost,
         perStorm: (P, hsg) => {
-          const before = runoffM3(P, hsg, up, res)
+          const before = runoffM3(P, hsg, up, res, CNT)
           const wood = (scsRunoff(P, CN_WOOD[hsg]) / 1000) * stripArea
-          return Math.min(before * 0.7, stripArea * 0.08 + Math.max(0, runoffM3(P, hsg, strip.length, res) - wood))
+          return Math.min(before * 0.7, stripArea * 0.08 + Math.max(0, runoffM3(P, hsg, strip.length, res, CNT) - wood))
         },
         perYear: [0, 0],
         m3per1000: ((lo + hi) / 2) / ((cost[0] + cost[1]) / 2) * 1000,
@@ -335,7 +337,7 @@ export function analyze(raw: RawInputs, onStep?: (k: string) => void): Analysis 
     const by = new Map<number, YearStat>()
     // spływ dobowy z poprawką na wilgotność poprzedzającą (AMC)
     const doyAt = (k: number) => { const d = new Date(start.getTime() + k * 86400000); return Math.floor((d.getTime() - Date.UTC(d.getUTCFullYear(), 0, 0)) / 86400000) }
-    const q = runoffSeries(raw.rain.p, CN_ARABLE[H], doyAt)
+    const q = runoffSeries(raw.rain.p, CNT[H], doyAt)
     raw.rain.p.forEach((p, k) => {
       const y = new Date(start.getTime() + k * 86400000).getUTCFullYear()
       const s = by.get(y) ?? { year: y, rain: 0, runoffM3: 0, heavy: 0, maxDay: 0 }
@@ -366,7 +368,7 @@ export function analyze(raw: RawInputs, onStep?: (k: string) => void): Analysis 
 
   return {
     raw, g, z, filled, dir, acc, accP, tanb, twi, mask, channel, parcelCells, areaHa, zmin, zmax, pzmin, pzmax,
-    meanSlopePct, exits, interventions, dam, validation, years, timings: T,
+    meanSlopePct, exits, interventions, dam, validation, years, timings: T, cnTable: CNT,
   }
 }
 

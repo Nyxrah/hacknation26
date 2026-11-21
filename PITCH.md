@@ -14,7 +14,7 @@
 
 ## Scenariusz na żywo (jury podaje działkę i datę)
 1. Wklej numer działki → „Szukaj” (mapa przelatuje do pola).
-2. Wybierz uprawę, ustaw datę od jury → „Sprawdź moje pole”.
+2. Wybierz uprawę, ustaw datę albo okres od jury → „Sprawdź moje pole”. Teren z europejskiego modelu 30 m, więc raport jest gotowy w ok. 10–15 s.
 3. **Komentuj, co pojawia się po kolei**:
    - „Po dwóch sekundach mamy pogodę z 10 lat. Tyle spadło, tyle wyparowało, tyle lat było suszej.”
    - „Teraz gleba z SoilGrids, więc liczymy bilans wody w strefie korzeni tej uprawy.” (status, pewność)
@@ -27,7 +27,9 @@
 - **Skąd pewność wyniku?** Trzy niezależne wskaźniki. Gdy się nie zgadzają, piszemy „pewność niska” i dlaczego.
 - **Satelita a rodzaj uprawy?** Porównujemy NDMI z wzorcem zdrowego łanu wybranej uprawy w danym tygodniu sezonu. Po zbiorze nie oceniamy.
 - **Dlaczego najpierw retencja?** „Retain water where it falls”, czyli zasada z Podstaw naukowych KOWR i wytycznych UE (NWRM).
-- **Geoportal jest wolny?** Liczymy na DEM 30 m, a raport sam doprecyzowuje się do NMT 1 m, gdy dane dotrą.
+- **Dlaczego nie lidar / NMT 1 m?** Zgodnie z zaleceniem mentora priorytet ma szybkość: domyślnie europejski model 30 m (2 s), NMT 1 m na życzenie jednym przyciskiem.
+- **Limit zapytań do pogody?** Cache na serwerze i automatyczne źródło zapasowe NASA POWER, a raport mówi, z którego źródła liczył.
+- **Ochrona środowiska?** Budżet wody: ile uprawa naprawdę potrzebuje, ile rolnik leje i ile prądu kosztuje nadwyżka; studnie i woda do oprysków z deszczówki.
 - **Drenaż?** Niewidoczny w danych. Mówimy to w każdym raporcie.
 - **AI?** Wyniki z deterministycznych metod naukowych, każda liczba jest śledzalna. AI pomogło nam pisać kod.
 

@@ -4,7 +4,7 @@
 // Gdy NMT 1 m z Geoportalu dotrze później, wynik doprecyzowuje się sam.
 import { analyze, polygonArea, type Analysis } from './analyze.ts'
 import { assess, NO_FARMER, type Assessment, type FarmerInput } from './assess.ts'
-import type { CropId } from './crops.ts'
+import { CROPS, cnFor, type CropId } from './crops.ts'
 import { from4326, toLatLng } from './crs.ts'
 import { rasterize } from './hydro.ts'
 import { FALLBACK_SOIL, farmerSoil, fetchSoil, type Soil } from './soil.ts'
@@ -46,6 +46,7 @@ export interface Result {
   generatedAt: string
   done: boolean
   farmer: FarmerInput
+  from?: string // początek okresu (tryb „okres”); date = koniec
   gzwp?: Gzwp[] | null // zbiorniki wód podziemnych pod działką (null = usługa nie odpowiedziała)
 }
 
@@ -72,10 +73,10 @@ function resample(src: Grid, dst: Omit<Grid, 'data'>): Grid {
   return { ...dst, data: out }
 }
 
-function terrain(parcel: Parcel, lat: number, lng: number, dem: Grid, soil: Soil | undefined, w: WeatherSeries | undefined, val: NdmiScene | null, ww: RawInputs['waterways']) {
+function terrain(parcel: Parcel, lat: number, lng: number, dem: Grid, soil: Soil | undefined, w: WeatherSeries | undefined, val: NdmiScene | null, ww: RawInputs['waterways'], cropId: CropId) {
   const g = { w: dem.w, h: dem.h, x0: dem.x0, y0: dem.y0, res: dem.res }
   const raw: RawInputs = {
-    parcel, dem, lat, lng, hsg: soil?.hsg ?? 'B', waterways: ww,
+    parcel, dem, lat, lng, hsg: soil?.hsg ?? 'B', cn: cnFor(CROPS[cropId]), waterways: ww,
     ndmi: val ? [{ ...val, grid: resample(val.grid, g) }] : [],
     rain: w ? { start: w.dates[0], p: w.liquid.slice(0, w.analysisIndex + 1) } : undefined,
     ortho: orthoUrl(g),
@@ -93,7 +94,7 @@ export function applySoil(s: Soil, kind: FarmerInput['soil']): Soil {
 }
 
 // ---------- prefetch: teren i gleba ruszają już po wskazaniu działki ----------
-interface Pre { bbox: [number, number, number, number]; lat: number; lng: number; nmt: Promise<Grid>; soil: Promise<Soil> }
+interface Pre { bbox: [number, number, number, number]; lat: number; lng: number; dem: Promise<Grid>; soil: Promise<Soil> }
 const pre = new Map<string, Pre>()
 
 function geom(parcel: Parcel) {
@@ -106,15 +107,15 @@ function geom(parcel: Parcel) {
 
 /**
  * Wywoływane, gdy rolnik wskaże działkę — zanim wybierze uprawę i datę.
- * NMT z Geoportalu (17–70 s) i gleba (3–13 s) nie zależą od uprawy ani daty, więc zwykle są gotowe,
- * zanim rolnik kliknie „Sprawdź”.
+ * Teren (europejski model 30 m, ~2 s) i gleba (3–13 s) nie zależą od uprawy ani daty, więc zwykle są gotowe,
+ * zanim rolnik kliknie „Sprawdź”. Szczegółowy NMT 1 m (Geoportal, 20–70 s) pobieramy tylko na życzenie.
  */
 export function prefetch(parcel: Parcel): Pre {
   const hit = pre.get(parcel.id)
   if (hit) return hit
   const { bbox, lat, lng } = geom(parcel)
-  const p: Pre = { bbox, lat, lng, nmt: fetchDem(bbox, 2, 240000), soil: fetchSoil(lat, lng) }
-  p.nmt.catch(() => pre.delete(parcel.id))
+  const p: Pre = { bbox, lat, lng, dem: fetchCopDem(bbox, 10), soil: fetchSoil(lat, lng) }
+  p.dem.catch(() => pre.delete(parcel.id))
   p.soil.catch(() => {})
   pre.set(parcel.id, p)
   return p
@@ -139,11 +140,11 @@ function compute(st: Result, ctx: Ctx): Result {
   if (ctx.dem) {
     const key = [ctx.dem, out.soil?.hsg, ctx.weatherRaw, st.farmer.rain7, ctx.val, ctx.ww]
     if (!ctx.memo || ctx.memo.key.some((k, i) => k !== key[i]))
-      ctx.memo = { key, A: terrain(st.parcel, st.lat, st.lng, ctx.dem, out.soil, out.weather, ctx.val, ctx.ww) }
+      ctx.memo = { key, A: terrain(st.parcel, st.lat, st.lng, ctx.dem, out.soil, out.weather, ctx.val, ctx.ww, st.cropId) }
     out.A = ctx.memo.A
   }
   if (out.weather && out.soil)
-    out.R = assess({ date: st.date, cropId: st.cropId, w: out.weather, soil: out.soil, A: out.A ?? null, current: st.current, mask: ctx.mask10, demLabel: st.demLabel, demFine: st.demFine, missing: st.missing, farmer: st.farmer, areaHa: polygonArea(st.parcel.ring) / 1e4 })
+    out.R = assess({ date: st.date, cropId: st.cropId, w: out.weather, soil: out.soil, A: out.A ?? null, current: st.current, mask: ctx.mask10, demLabel: st.demLabel, demFine: st.demFine, missing: st.missing, farmer: st.farmer, areaHa: polygonArea(st.parcel.ring) / 1e4, from: st.from })
   ctxOf.set(out, ctx)
   return out
 }
@@ -155,7 +156,23 @@ export function refine(res: Result, farmer: FarmerInput): Result {
   return compute({ ...res, farmer, generatedAt: res.generatedAt }, ctx)
 }
 
-export async function runAnalysis(parcel: Parcel, date: string, cropId: CropId, progress: Progress, onUpdate: (r: Result) => void, farmer: FarmerInput = NO_FARMER): Promise<Result> {
+const COP_LABEL = 'Copernicus DEM GLO-30 — europejski model terenu 30 m (spadki i kierunki spływu; rowy i zagłębienia węższe niż ok. 30 m mogą być niewidoczne)'
+const NMT_LABEL = 'NMT 1 m z Geoportalu (uśredniony do 2 m)'
+
+/** Na życzenie: szczegółowy model terenu 1 m z Geoportalu (lidar) — dokładniejsze cieki, zagłębienia i miejsca retencji. */
+export async function upgradeTerrain(res: Result): Promise<Result> {
+  const ctx = ctxOf.get(res)
+  if (!ctx) return res
+  const { bbox } = geom(res.parcel)
+  const fine = await fetchDem(bbox, 2, 150000)
+  ctx.dem = fine
+  ctx.memo = undefined
+  const st: Result = { ...res, demLabel: NMT_LABEL, demFine: true }
+  st.sources = res.sources.map((x) => x.name.startsWith('Copernicus DEM') ? { name: 'NMT 1 m — Geoportal (GUGiK), usługa WCS', what: 'ukształtowanie terenu, spadki, spływ, cieki', when: new Date().toLocaleString('pl-PL'), license: 'bezpłatne, do dowolnego wykorzystania' } : x)
+  return compute(st, ctx)
+}
+
+export async function runAnalysis(parcel: Parcel, date: string, cropId: CropId, progress: Progress, onUpdate: (r: Result) => void, farmer: FarmerInput = NO_FARMER, from?: string): Promise<Result> {
   const t0 = performance.now()
   const now = new Date().toLocaleString('pl-PL')
   const missing: string[] = []
@@ -167,16 +184,16 @@ export async function runAnalysis(parcel: Parcel, date: string, cropId: CropId, 
   const g10 = { w: Math.floor((bbox[2] - bbox[0]) / 10), h: Math.floor((bbox[3] - bbox[1]) / 10), x0: bbox[0], y0: bbox[3], res: 10 }
   const mask10 = rasterize(parcel.ring, g10)
 
-  let st: Result = { parcel, date, cropId, lat, lng, demLabel: 'ukształtowanie terenu: pobieram…', demFine: false, sources: [], missing, seconds: 0, generatedAt: now, done: false, farmer }
+  let st: Result = { parcel, date, cropId, lat, lng, demLabel: 'ukształtowanie terenu: pobieram…', demFine: false, sources: [], missing, seconds: 0, generatedAt: now, done: false, farmer, from }
   const ctx: Ctx = { dem: null, val: null, ww: [], mask10 }
 
   const sources = (): SourceInfo[] => [
     { name: 'ULDK — Usługa Lokalizacji Działek Katastralnych (GUGiK)', what: 'granica i numer działki', when: now, license: 'dane publiczne, bezpłatne' },
     st.demFine
       ? { name: 'NMT 1 m — Geoportal (GUGiK), usługa WCS', what: 'ukształtowanie terenu, spadki, spływ, cieki', when: now, license: 'bezpłatne, do dowolnego wykorzystania' }
-      : { name: 'Copernicus DEM GLO-30 (ESA / Airbus), AWS Open Data', what: 'ukształtowanie terenu (przybliżone)', when: now, license: 'licencja Copernicus DEM — bezpłatna' },
+      : { name: 'Copernicus DEM GLO-30 (ESA / Airbus) — europejski model terenu, AWS Open Data', what: 'ukształtowanie terenu, spadki, kierunki spływu', when: now, license: 'licencja Copernicus DEM — bezpłatna' },
     { name: 'Ortofotomapa — Geoportal (GUGiK), usługa WMS', what: 'podkład zdjęciowy', when: now, license: 'bezpłatne' },
-    { name: 'Open-Meteo Historical Weather: ERA5 i ERA5-Land (ECMWF)' + (ctx.weatherRaw?.forecastFrom != null ? ' + prognoza 7 dni' : ''), what: ctx.weatherRaw ? `opady, ET₀, temperatura, wilgotność gleby 0–100 cm · ${ctx.weatherRaw.dates[0]} – ${ctx.weatherRaw.dates[Math.min(ctx.weatherRaw.analysisIndex, ctx.weatherRaw.dates.length - 1)]}` : '—', when: now, license: 'CC BY 4.0' },
+    { name: ctx.weatherRaw?.smLabel === 'NASA POWER / MERRA-2' ? 'NASA POWER (MERRA-2) — źródło zapasowe (Open-Meteo: limit zapytań)' + (ctx.weatherRaw?.forecastFrom != null ? ' + prognoza Open-Meteo' : '') : 'Open-Meteo Historical Weather: ERA5 i ERA5-Land (ECMWF)' + (ctx.weatherRaw?.forecastFrom != null ? ' + prognoza 7 dni' : ''), what: ctx.weatherRaw ? `opady, ET₀, temperatura, wilgotność gleby 0–100 cm · ${ctx.weatherRaw.dates[0]} – ${ctx.weatherRaw.dates[Math.min(ctx.weatherRaw.analysisIndex, ctx.weatherRaw.dates.length - 1)]}` : '—', when: now, license: ctx.weatherRaw?.smLabel === 'NASA POWER / MERRA-2' ? 'NASA POWER — dane publiczne NASA (bezpłatne, z podaniem źródła)' : 'CC BY 4.0' },
     { name: 'ISRIC SoilGrids 2.0', what: ctx.soilRaw?.source === 'SoilGrids' ? 'uziarnienie i węgiel organiczny 0–60 cm' : 'NIEDOSTĘPNE — przyjęto glebę średnią', when: now, license: 'CC BY 4.0' },
     { name: 'Sentinel-2 L2A (Copernicus) — katalog Earth Search (Element 84)', what: st.current ? `NDVI/NDMI, scena ${st.current.sceneId}` : 'brak bezchmurnej sceny z 45 dni', when: now, license: 'licencja Copernicus Sentinel — bezpłatna' },
     ...(ctx.ww?.length ? [{ name: 'OpenStreetMap (Overpass API)', what: 'rowy i cieki', when: now, license: 'ODbL' }] : []),
@@ -191,7 +208,7 @@ export async function runAnalysis(parcel: Parcel, date: string, cropId: CropId, 
   }
 
   progress('pogoda', 'run'); progress('gleba', 'run'); progress('satelita', 'run'); progress('teren', 'run')
-  const pW = fetchWeather(lat, lng, date).then((w) => { ctx.weatherRaw = w; progress('pogoda', 'ok', `${w.dates[0].slice(0, 4)}–${date.slice(0, 4)} · ${w.dates.length} dni`); emit() })
+  const pW = fetchWeather(lat, lng, date, from).then((w) => { ctx.weatherRaw = w; progress('pogoda', 'ok', `${w.dates[0].slice(0, 4)}–${date.slice(0, 4)} · ${w.dates.length} dni`); emit() })
   pW.catch((e) => progress('pogoda', 'err', 'Open-Meteo nie odpowiada: ' + e.message))
   const pS = timeout(pf.soil, 15000).then((s) => {
     if (s === 'timeout') throw new Error('timeout')
@@ -215,28 +232,14 @@ export async function runAnalysis(parcel: Parcel, date: string, cropId: CropId, 
     if (ctx.ww?.length && ctx.dem) emit()
   })
 
-  const first = await timeout(pf.nmt.catch(() => null), 20000)
-  if (first && first !== 'timeout') {
-    ctx.dem = first
-    st.demLabel = 'NMT 1 m z Geoportalu (uśredniony do 2 m)'
-    st.demFine = true
-    progress('teren', 'ok', `NMT 1 m · ${first.w}×${first.h} pól`)
-  } else {
-    progress('teren', 'run', 'Geoportal odpowiada wolno — biorę model 30 m')
-    try {
-      ctx.dem = await fetchCopDem(bbox, 10)
-      st.demLabel = 'Copernicus DEM 30 m (NMT 1 m z Geoportalu nie odpowiedział w 20 s; model powierzchni — z drzewami i budynkami)'
-      progress('teren', 'ok', 'przybliżony 30 m · doprecyzuję, gdy dotrze NMT 1 m')
-      pf.nmt.then((fine) => {
-        ctx.dem = fine
-        st.demLabel = 'NMT 1 m z Geoportalu (uśredniony do 2 m)'
-        st.demFine = true
-        emit()
-      }).catch(() => {})
-    } catch {
-      progress('teren', 'err', 'brak danych o terenie')
-      missing.push('Nie udało się pobrać modelu terenu — bez analizy spływu i miejsc retencji.')
-    }
+  // teren: europejski model Copernicus DEM 30 m — szybki (zalecenie mentora: priorytet szybkość, bez lidaru)
+  try {
+    ctx.dem = await pf.dem
+    st.demLabel = COP_LABEL
+    progress('teren', 'ok', 'Copernicus DEM 30 m (europejski)')
+  } catch {
+    progress('teren', 'err', 'brak danych o terenie')
+    missing.push('Nie udało się pobrać modelu terenu — bez analizy spływu i miejsc retencji.')
   }
   progress('woda', 'run')
   await Promise.all([pW.catch(() => {}), pS, pSat])

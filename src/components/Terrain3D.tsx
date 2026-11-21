@@ -80,10 +80,21 @@ export function Terrain3D({ A, texture, rain, raining, dam, damOn, focus }: Prop
     scene.add(sun)
 
     // teren
-    const geo = new THREE.PlaneGeometry((w - 1) * res, (h - 1) * res, w - 1, h - 1)
+    // gładka powierzchnia: siatka zagęszczona (interpolacja dwuliniowa), gdy model terenu jest rzadki (np. 10–30 m)
+    const F = Math.max(1, Math.min(6, Math.round(Math.sqrt(160000 / (w * h)))))
+    const W2 = (w - 1) * F + 1, H2 = (h - 1) * F + 1
+    const geo = new THREE.PlaneGeometry((w - 1) * res, (h - 1) * res, W2 - 1, H2 - 1)
     geo.rotateX(-Math.PI / 2)
     const P = geo.attributes.position as THREE.BufferAttribute
-    for (let i = 0; i < w * h; i++) P.setY(i, (z[i] - zmin) * ex)
+    for (let r = 0; r < H2; r++)
+      for (let c = 0; c < W2; c++) {
+        const fr = r / F, fc = c / F
+        const r0 = Math.min(h - 2, Math.floor(fr)), c0 = Math.min(w - 2, Math.floor(fc))
+        const tr = fr - r0, tc = fc - c0
+        const Z = (rr: number, cc: number) => z[rr * w + cc]
+        const v = (Z(r0, c0) * (1 - tc) + Z(r0, c0 + 1) * tc) * (1 - tr) + (Z(r0 + 1, c0) * (1 - tc) + Z(r0 + 1, c0 + 1) * tc) * tr
+        P.setY(r * W2 + c, (v - zmin) * ex)
+      }
     geo.computeVertexNormals()
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 })
     const terrain = new THREE.Mesh(geo, mat)
@@ -98,8 +109,8 @@ export function Terrain3D({ A, texture, rain, raining, dam, damOn, focus }: Prop
         skirt.push(ax, ay, az, bx, by, bz, ax, base, az, bx, by, bz, bx, base, bz, ax, base, az)
       }
     }
-    const top = [...Array(w).keys()], bottom = top.map((c) => (h - 1) * w + c)
-    const left = [...Array(h).keys()].map((r) => r * w), right = left.map((i) => i + w - 1)
+    const top = [...Array(W2).keys()], bottom = top.map((c) => (H2 - 1) * W2 + c)
+    const left = [...Array(H2).keys()].map((r) => r * W2), right = left.map((i) => i + W2 - 1)
     side(top); side(bottom.reverse()); side(left.reverse()); side(right)
     const sg = new THREE.BufferGeometry()
     sg.setAttribute('position', new THREE.Float32BufferAttribute(skirt, 3))

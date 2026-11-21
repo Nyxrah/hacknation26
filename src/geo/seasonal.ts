@@ -126,7 +126,7 @@ export function seasonal(w: WeatherSeries, date: string, crop: Crop, active: boo
     sev, title, deepDrier: pDeep === null ? null : deepHist.filter((v) => v < (deepNow as number)).length, n: years.length,
     kbw12, kbw12Drier: kbw12Hist.filter((v) => v < kbw12).length, recharge, rechargeNorm: mean(rechargeHist), advice,
     why: `Bilans opad − parowanie z ostatnich 12 miesięcy: ${Math.round(kbw12)} mm (bardziej sucho było w ${kbw12Hist.filter((v) => v < kbw12).length} z ${kbw12Hist.length} lat)` +
-      (pDeep !== null ? `; wilgotność głębokiej warstwy 1–2,5 m (ERA5-Land): bardziej sucho było w ${deepHist.filter((v) => v < (deepNow as number)).length} z ${deepHist.length} lat` : '') +
+      (pDeep !== null ? `; wilgotność głębokiej warstwy gleby (${w.smLabel}): bardziej sucho było w ${deepHist.filter((v) => v < (deepNow as number)).length} z ${deepHist.length} lat` : '') +
       `; zasilanie zimowe (${winter.label}, deszcz + roztopy − parowanie): ${Math.round(recharge)} mm wobec ${Math.round(mean(rechargeHist))} mm średnio.`,
   }
 

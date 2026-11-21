@@ -25,7 +25,8 @@ export function saxtonRawls(S: number, C: number, OM: number) {
   return { fc, wp }
 }
 
-function textureName(sand: number, clay: number, silt: number) {
+function textureName(sand: number, clay: number, silt: number, soc = 0) {
+  if (soc >= 2.5 && silt >= 40 && clay < 30) return 'gleba próchniczna (typu czarnoziem)'
   if (sand >= 85) return 'piasek'
   if (sand >= 70 && clay < 15) return 'piasek gliniasty'
   if (clay >= 40) return 'ił'
@@ -39,7 +40,7 @@ export function classify(clay: number, sand: number, silt: number, soc: number, 
   const om = soc * 1.72
   const { fc, wp } = saxtonRawls(sand / 100, clay / 100, om)
   const awc = Math.max(40, (fc - wp) * 1000)
-  const texture = textureName(sand, clay, silt)
+  const texture = textureName(sand, clay, silt, soc)
   const category: Soil['category'] = sand >= 80 ? 'I' : sand >= 65 ? 'II' : clay >= 30 ? 'IV' : 'III'
   const categoryName = {
     I: 'bardzo podatna na suszę (gleba bardzo lekka)',
@@ -90,7 +91,11 @@ export async function fetchSoil(lat: number, lng: number, timeout = 15000): Prom
 }
 
 /** Gleba wskazana przez rolnika (kategoria agronomiczna) — typowe uziarnienie; próchnica z SoilGrids. */
-export function farmerSoil(kind: 'bardzo lekka' | 'lekka' | 'średnia' | 'ciężka', soc: number): Soil {
+export function farmerSoil(kind: 'bardzo lekka' | 'lekka' | 'średnia' | 'ciężka' | 'czarnoziem', soc: number): Soil {
+  if (kind === 'czarnoziem') {
+    const s = classify(18, 22, 60, Math.max(soc, 2.8), 'rolnik')
+    return { ...s, category: 'IV', categoryName: 'mało podatna na suszę (gleba próchniczna, dużo wody z zimy)', texture: 'czarnoziem / gleba próchniczna (wg rolnika)' }
+  }
   const t = { 'bardzo lekka': [3, 90, 7], lekka: [8, 72, 20], 'średnia': [18, 45, 37], 'ciężka': [38, 25, 37] }[kind]
   const s = classify(t[0], t[1], t[2], soc, 'rolnik')
   return { ...s, texture: `gleba ${kind} (wg rolnika)` }
